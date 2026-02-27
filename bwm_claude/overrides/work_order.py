@@ -122,6 +122,59 @@ def return_and_close(work_order):
     # Build the return Stock Entry (same as Return Components button)
     cost_center = wo.cost_center or ""
 
+    # Fetch batch details from original Material Transfer entries for this WO
+    # This gives us which batches were issued to WIP for each item
+    original_batches = frappe.db.sql("""
+        SELECT sed.item_code, sed.batch_no, sed.s_warehouse,
+               SUM(sed.qty) as issued_qty
+        FROM `tabStock Entry` se
+        JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+        WHERE se.work_order = %s
+        AND se.purpose = 'Material Transfer for Manufacture'
+        AND se.is_return = 0
+        AND se.docstatus = 1
+        AND sed.t_warehouse = %s
+        GROUP BY sed.item_code, sed.batch_no, sed.s_warehouse
+        ORDER BY sed.item_code, sed.batch_no
+    """, (wo.name, wo.wip_warehouse), as_dict=True)
+
+    # Also get already-returned quantities per item+batch to avoid double-returning
+    already_returned = frappe.db.sql("""
+        SELECT sed.item_code, sed.batch_no, SUM(sed.qty) as returned_qty
+        FROM `tabStock Entry` se
+        JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+        WHERE se.work_order = %s
+        AND se.purpose = 'Material Transfer for Manufacture'
+        AND se.is_return = 1
+        AND se.docstatus = 1
+        AND sed.s_warehouse = %s
+        GROUP BY sed.item_code, sed.batch_no
+    """, (wo.name, wo.wip_warehouse), as_dict=True)
+
+    # Build lookup: {(item_code, batch_no): returned_qty}
+    returned_map = {}
+    for r in already_returned:
+        key = (r.item_code, r.batch_no or "")
+        returned_map[key] = returned_map.get(key, 0) + (r.returned_qty or 0)
+
+    # Build batch-wise return rows
+    # For each excess item, split across batches proportionally
+    batch_map = {}  # {item_code: [{batch_no, s_warehouse, available_qty}]}
+    for ob in original_batches:
+        ic = ob.item_code
+        bn = ob.batch_no or ""
+        issued = ob.issued_qty or 0
+        already_ret = returned_map.get((ic, bn), 0)
+        available = round(issued - already_ret, 3)
+        if available > 0.01:
+            if ic not in batch_map:
+                batch_map[ic] = []
+            batch_map[ic].append({
+                "batch_no": ob.batch_no,
+                "s_warehouse_orig": ob.s_warehouse,
+                "available_qty": available,
+            })
+
     se = frappe.new_doc("Stock Entry")
     se.purpose = "Material Transfer for Manufacture"
     se.stock_entry_type = "Material Transfer for Manufacture"
@@ -136,41 +189,66 @@ def return_and_close(work_order):
     )
 
     for item in excess_items:
+        remaining = item["excess_qty"]
+        batches = batch_map.get(item["item_code"], [])
         target_wh = item["source_warehouse"] or wo.source_warehouse
-        if not target_wh:
-            # Fallback: find from original issue entry
-            orig = frappe.db.sql("""
-                SELECT DISTINCT sed.s_warehouse
-                FROM `tabStock Entry` se
-                JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
-                WHERE se.work_order = %s
-                AND se.purpose = 'Material Transfer for Manufacture'
-                AND se.is_return = 0
-                AND se.docstatus = 1
-                AND sed.item_code = %s
-                AND sed.s_warehouse IS NOT NULL
-                AND sed.s_warehouse != %s
-                LIMIT 1
-            """, (wo.name, item["item_code"], wo.wip_warehouse))
-            if orig:
-                target_wh = orig[0][0]
 
-        if not target_wh:
-            frappe.throw(
-                _("Cannot determine source warehouse for {0}. "
-                  "Please use Return Components manually.").format(item["item_code"])
-            )
+        if batches:
+            # Add one row per batch, allocating excess across batches
+            for b in batches:
+                if remaining <= 0.01:
+                    break
+                return_qty = min(remaining, b["available_qty"])
+                t_wh = b["s_warehouse_orig"] or target_wh
+                row_data = {
+                    "item_code": item["item_code"],
+                    "item_name": item["item_name"],
+                    "qty": round(return_qty, 3),
+                    "uom": item["stock_uom"],
+                    "stock_uom": item["stock_uom"],
+                    "s_warehouse": wo.wip_warehouse,
+                    "t_warehouse": t_wh,
+                    "cost_center": cost_center,
+                }
+                if b["batch_no"]:
+                    row_data["batch_no"] = b["batch_no"]
+                se.append("items", row_data)
+                remaining = round(remaining - return_qty, 3)
+        else:
+            # No batch info found — add without batch (non-batch items)
+            if not target_wh:
+                orig = frappe.db.sql("""
+                    SELECT DISTINCT sed.s_warehouse
+                    FROM `tabStock Entry` se
+                    JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+                    WHERE se.work_order = %s
+                    AND se.purpose = 'Material Transfer for Manufacture'
+                    AND se.is_return = 0
+                    AND se.docstatus = 1
+                    AND sed.item_code = %s
+                    AND sed.s_warehouse IS NOT NULL
+                    AND sed.s_warehouse != %s
+                    LIMIT 1
+                """, (wo.name, item["item_code"], wo.wip_warehouse))
+                if orig:
+                    target_wh = orig[0][0]
 
-        se.append("items", {
-            "item_code": item["item_code"],
-            "item_name": item["item_name"],
-            "qty": item["excess_qty"],
-            "uom": item["stock_uom"],
-            "stock_uom": item["stock_uom"],
-            "s_warehouse": wo.wip_warehouse,
-            "t_warehouse": target_wh,
-            "cost_center": cost_center,
-        })
+            if not target_wh:
+                frappe.throw(
+                    _("Cannot determine source warehouse for {0}. "
+                      "Please use Return Components manually.").format(item["item_code"])
+                )
+
+            se.append("items", {
+                "item_code": item["item_code"],
+                "item_name": item["item_name"],
+                "qty": item["excess_qty"],
+                "uom": item["stock_uom"],
+                "stock_uom": item["stock_uom"],
+                "s_warehouse": wo.wip_warehouse,
+                "t_warehouse": target_wh,
+                "cost_center": cost_center,
+            })
 
     # Save and submit the return entry
     se.insert()
