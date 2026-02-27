@@ -1,0 +1,17 @@
+[project]
+name = "bwm_claude"
+version = "0.0.1"
+description = "BWM Claude - Custom overrides and automation for Banaraswala Wire Mesh"
+authors = [
+    {name = "Banaraswala Wire Mesh P Limited", email = "vishal@banaraswala.com"}
+]
+requires-python = ">=3.10"
+dependencies = ["frappe", "erpnext"]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core:buildapi"
+
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0"
+erpnext = ">=15.0.0"

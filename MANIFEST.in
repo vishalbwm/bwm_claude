@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include bwm_claude *.css
+recursive-include bwm_claude *.csv
+recursive-include bwm_claude *.html
+recursive-include bwm_claude *.ico
+recursive-include bwm_claude *.js
+recursive-include bwm_claude *.json
+recursive-include bwm_claude *.md
+recursive-include bwm_claude *.png
+recursive-include bwm_claude *.py
+recursive-include bwm_claude *.svg
+recursive-include bwm_claude *.txt
+recursive-exclude bwm_claude *.pyc
