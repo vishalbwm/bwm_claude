@@ -6,12 +6,7 @@ authors = [
     {name = "Banaraswala Wire Mesh P Limited", email = "vishal@banaraswala.com"}
 ]
 requires-python = ">=3.10"
-dependencies = ["frappe", "erpnext"]
 
 [build-system]
-requires = ["flit_core >=3.4,<4"]
-build-backend = "flit_core:buildapi"
-
-[tool.bench.frappe-dependencies]
-frappe = ">=15.0.0"
-erpnext = ">=15.0.0"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
