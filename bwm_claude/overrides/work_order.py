@@ -123,10 +123,11 @@ def return_and_close(work_order):
     cost_center = wo.cost_center or ""
 
     # Fetch batch details from original Material Transfer entries for this WO
-    # This gives us which batches were issued to WIP for each item
+    # This gives us which batches were issued to WIP for each item, with original rates
     original_batches = frappe.db.sql("""
         SELECT sed.item_code, sed.batch_no, sed.s_warehouse,
-               SUM(sed.qty) as issued_qty
+               SUM(sed.qty) as issued_qty,
+               SUM(sed.basic_amount) / NULLIF(SUM(sed.qty), 0) as original_rate
         FROM `tabStock Entry` se
         JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
         WHERE se.work_order = %s
@@ -173,6 +174,7 @@ def return_and_close(work_order):
                 "batch_no": ob.batch_no,
                 "s_warehouse_orig": ob.s_warehouse,
                 "available_qty": available,
+                "original_rate": ob.original_rate or 0,
             })
 
     se = frappe.new_doc("Stock Entry")
@@ -209,6 +211,7 @@ def return_and_close(work_order):
                     "s_warehouse": wo.wip_warehouse,
                     "t_warehouse": t_wh,
                     "cost_center": cost_center,
+                    "basic_rate": b["original_rate"],
                 }
                 if b["batch_no"]:
                     row_data["batch_no"] = b["batch_no"]
