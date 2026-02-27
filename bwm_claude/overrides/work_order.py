@@ -253,9 +253,33 @@ def return_and_close(work_order):
                 "cost_center": cost_center,
             })
 
-    # Save and submit the return entry
+    # Force ERPNext to use the original issue rate
+    for row in se.items:
+        if row.basic_rate:
+            row.allow_zero_valuation_rate = 0
+
+    # Save as DRAFT - do not auto-submit
+    # User must review batch, quantities, and valuation rate before submitting
+    se.flags.ignore_permissions = True
     se.insert()
-    se.submit()
+
+    # After insert, force original rates back (ERPNext recalculates during insert)
+    rate_updated = False
+    for row in se.items:
+        batches = batch_map.get(row.item_code, [])
+        for b in batches:
+            if (b["batch_no"] or "") == (row.batch_no or ""):
+                if b["original_rate"] and abs(row.basic_rate - b["original_rate"]) > 0.01:
+                    row.basic_rate = b["original_rate"]
+                    row.basic_amount = round(row.qty * b["original_rate"], 2)
+                    row.amount = row.basic_amount
+                    row.valuation_rate = b["original_rate"]
+                    rate_updated = True
+                break
+
+    if rate_updated:
+        se.flags.ignore_permissions = True
+        se.save()
 
     # Now close the Work Order
     from erpnext.manufacturing.doctype.work_order.work_order import (
@@ -269,8 +293,9 @@ def return_and_close(work_order):
         "stock_entry": se.name,
         "total_returned_qty": total_returned,
         "items_count": len(excess_items),
+        "draft": True,
         "message": (
-            "Returned " + str(total_returned) + " Kgs via " + str(se.name)
-            + " and closed WO " + str(wo.name) + "."
+            "Draft return " + str(se.name) + " created with " + str(total_returned)
+            + " Kgs. WO " + str(wo.name) + " closed. Please review rates and submit the return entry."
         ),
     }

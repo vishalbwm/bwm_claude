@@ -14,11 +14,3 @@ override_whitelisted_methods = {
     "erpnext.manufacturing.doctype.work_order.work_order.close_work_order": "bwm_claude.overrides.work_order.close_work_order_with_rm_check",
     "erpnext.manufacturing.doctype.work_order.work_order.stop_unstop": "bwm_claude.overrides.work_order.stop_unstop_with_rm_check",
 }
-
-# --------------------------------------------------------------------------
-# Client Scripts (JS injected into DocType forms)
-# --------------------------------------------------------------------------
-# Add "Return & Close" button to Work Order form
-doctype_js = {
-    "Work Order": "public/js/work_order.js",
-}
